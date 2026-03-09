@@ -17,6 +17,21 @@ FAILED_LOGIN_THRESHOLD = 3
 # In-memory failed login tracker
 failed_logins = {}
 
+def lambda_handler(event, context):
+    log_data = event['awslogs']['data']
+    compressed = base64.b64decode(log_data)
+    uncompressed = gzip.decompress(compressed)
+    log_events = json.loads(uncompressed)
+
+    for log_event in log_events['logEvents']:
+        try:
+            event_message = json.loads(log_event['message'])
+            analyze_event(event_message)
+        except Exception as e:
+            print(f"Error processing event: {e}")
+
+    return {'statusCode': 200, 'body': 'Analysis complete'}
+
 def analyze_event(event):
     # Ignore AWS internal service events
     ignored_sources = [
@@ -41,28 +56,6 @@ def analyze_event(event):
     if user_type in ['AWSService', 'AWSAccount']:
         return
 
-def lambda_handler(event, context):
-    log_data = event['awslogs']['data']
-    compressed = base64.b64decode(log_data)
-    uncompressed = gzip.decompress(compressed)
-    log_events = json.loads(uncompressed)
-    
-    for log_event in log_events['logEvents']:
-        try:
-            event_message = json.loads(log_event['message'])
-            analyze_event(event_message)
-        except Exception as e:
-            print(f"Error processing event: {e}")
-    
-    return {'statusCode': 200, 'body': 'Analysis complete'}
-
-def analyze_event(event):
-    event_name = event.get('eventName', '')
-    user_identity = event.get('userIdentity', {})
-    source_ip = event.get('sourceIPAddress', 'Unknown')
-    user_type = user_identity.get('type', '')
-    username = user_identity.get('userName', 'Unknown')
-    
     # Rule 1 — Root Account Usage (Critical)
     if user_type == 'Root':
         trigger_alert(
@@ -126,14 +119,6 @@ def analyze_event(event):
     
     # Rule 6 — Suspicious Region Activity (Medium)
     allowed_regions = ['us-east-1']
-    # Ignore AWS internal service calls
-    ignored_sources = [
-        'resource-explorer-2.amazonaws.com',
-        'aws-internal',
-        'cloudtrail.amazonaws.com',
-        'config.amazonaws.com',
-        'guardduty.amazonaws.com'
-    ]
     event_region = event.get('awsRegion', '')
     if (event_region and 
         event_region not in allowed_regions and 
