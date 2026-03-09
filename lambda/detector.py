@@ -17,6 +17,30 @@ FAILED_LOGIN_THRESHOLD = 3
 # In-memory failed login tracker
 failed_logins = {}
 
+def analyze_event(event):
+    # Ignore AWS internal service events
+    ignored_sources = [
+        'resource-explorer-2.amazonaws.com',
+        'aws-internal',
+        'cloudtrail.amazonaws.com',
+        'config.amazonaws.com',
+        'guardduty.amazonaws.com',
+        'health.amazonaws.com',
+        'trustedadvisor.amazonaws.com'
+    ]
+    
+    event_name = event.get('eventName', '')
+    user_identity = event.get('userIdentity', {})
+    source_ip = event.get('sourceIPAddress', 'Unknown')
+    user_type = user_identity.get('type', '')
+    username = user_identity.get('userName', 'Unknown')
+    
+    # Skip AWS internal service calls
+    if source_ip in ignored_sources:
+        return
+    if user_type in ['AWSService', 'AWSAccount']:
+        return
+
 def lambda_handler(event, context):
     log_data = event['awslogs']['data']
     compressed = base64.b64decode(log_data)
@@ -102,8 +126,19 @@ def analyze_event(event):
     
     # Rule 6 — Suspicious Region Activity (Medium)
     allowed_regions = ['us-east-1']
+    # Ignore AWS internal service calls
+    ignored_sources = [
+        'resource-explorer-2.amazonaws.com',
+        'aws-internal',
+        'cloudtrail.amazonaws.com',
+        'config.amazonaws.com',
+        'guardduty.amazonaws.com'
+    ]
     event_region = event.get('awsRegion', '')
-    if event_region and event_region not in allowed_regions:
+    if (event_region and 
+        event_region not in allowed_regions and 
+        source_ip not in ignored_sources and
+        user_type not in ['AWSService', 'AWSAccount']):
         trigger_alert(
             incident_type='Suspicious Region Activity',
             severity='MEDIUM',
